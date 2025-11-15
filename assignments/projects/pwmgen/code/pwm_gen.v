@@ -10,7 +10,88 @@ module pwm_gen (
     input[15:0] compare2,
     input[15:0] count_val,
     // top facing signals
-    output pwm_out
+    output reg pwm_out
 );
+
+    // Extragere biti de configurare din registrul functions
+    wire align_left_right = functions[0];  // 0 = stanga, 1 = dreapta
+    wire aligned_mode = functions[1];      // 0 = aliniat, 1 = nealiniat
     
+    // Detectare overflow/underflow pentru resetarea la configurari noi
+    reg last_overflow_underflow;
+    wire overflow_underflow;
+    
+    // Determinare daca numaratorul a dat overflow sau underflow
+    // Overflow cand count_val == period
+    // Underflow cand count_val == 0 (pentru modul descrescator)
+    assign overflow_underflow = (count_val == period) || (count_val == 16'h0000);
+    
+    // Registrii pentru retinerea configuratiei la overflow/underflow
+    reg[15:0] active_period;
+    reg[15:0] active_compare1;
+    reg[15:0] active_compare2;
+    reg active_align_left_right;
+    reg active_aligned_mode;
+    
+    // Logica principala PWM
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            pwm_out <= 1'b0;
+            last_overflow_underflow <= 1'b0;
+            active_period <= 16'h0000;
+            active_compare1 <= 16'h0000;
+            active_compare2 <= 16'h0000;
+            active_align_left_right <= 1'b0;
+            active_aligned_mode <= 1'b0;
+        end else begin
+            last_overflow_underflow <= overflow_underflow;
+            
+            // Actualizare configuratie la overflow/underflow (pe front)
+            if (overflow_underflow && !last_overflow_underflow) begin
+                active_period <= period;
+                active_compare1 <= compare1;
+                active_compare2 <= compare2;
+                active_align_left_right <= align_left_right;
+                active_aligned_mode <= aligned_mode;
+            end
+            
+            // Generare semnal PWM
+            if (!pwm_en) begin
+                // PWM dezactivat - mentinem ultima stare
+                pwm_out <= pwm_out;
+            end else begin
+                // Mod aliniat (aligned_mode == 0)
+                if (!active_aligned_mode) begin
+                    // Aliniere la stanga (align_left_right == 0)
+                    if (!active_align_left_right) begin
+                        // Start pe 1, schimba in 0 cand ajunge la compare1
+                        if (overflow_underflow && !last_overflow_underflow) begin
+                            pwm_out <= 1'b1;  // Reset la inceput de perioada
+                        end else if (count_val == active_compare1) begin
+                            pwm_out <= 1'b0;
+                        end
+                    end else begin
+                        // Aliniere la dreapta (align_left_right == 1)
+                        // Start pe 0, schimba in 1 cand ajunge la compare1
+                        if (overflow_underflow && !last_overflow_underflow) begin
+                            pwm_out <= 1'b0;  // Reset la inceput de perioada
+                        end else if (count_val == active_compare1) begin
+                            pwm_out <= 1'b1;
+                        end
+                    end
+                end else begin
+                    // Mod nealiniat (aligned_mode == 1)
+                    // Start pe 0, devine 1 la compare1, revine la 0 la compare2
+                    if (overflow_underflow && !last_overflow_underflow) begin
+                        pwm_out <= 1'b0;  // Reset la inceput de perioada
+                    end else if (count_val == active_compare1) begin
+                        pwm_out <= 1'b1;
+                    end else if (count_val == active_compare2) begin
+                        pwm_out <= 1'b0;
+                    end
+                end
+            end
+        end
+    end
+
 endmodule
