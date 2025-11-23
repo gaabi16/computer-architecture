@@ -1,50 +1,42 @@
-# PWM Generator (`pwm_gen.v`) – Documentatie de implementare
+# PWM Generator (`pwm_gen.v`) – Implementation Documentation
 
-Acest document descrie implementarea modulului **PWM Generator** (`pwm_gen.v`) utilizat pentru generarea semnalelor PWM. Acesta primeste configuratii din registrii si valoarea curenta a numaratorului, generand semnalul de iesire pwm_out conform specificatiilor.
+## Module Implementation
 
----
-
-## Implementarea modulului
-
-### 1. Extrageri de biti din registrul `functions`
-
+### 1. Bit Extraction from `functions` Register
 ```verilog
 wire align_left_right = functions[0];
 wire aligned_mode = functions[1];
 ```
 
-* `align_left_right` controleaza daca semnalul este left-aligned sau right-aligned.
-* `aligned_mode` controleaza modul de functionare al PWM-ului (aligned sau unaligned).
+* `align_left_right` controls whether the signal is left-aligned or right-aligned.
+* `aligned_mode` controls the PWM operating mode (aligned or unaligned).
 
 ---
 
-### 2. Detectarea overflow/underflow
-
+### 2. Overflow/Underflow Detection
 ```verilog
 wire overflow_event = (count_val == period);
 wire wrap_event = (count_val == 0 && last_count_val == period);
 wire overflow_underflow = overflow_event || wrap_event;
 ```
 
-* `overflow_event` = 1 cand counter-ul ajunge la valoarea `PERIOD`.
-* `wrap_event` = 1 cand counter-ul a facut wrap de la `PERIOD` la 0.
-* `overflow_underflow` = combina ambele evenimente si marcheaza **inceputul unei noi perioade**.
+* `overflow_event` = 1 when the counter reaches the `PERIOD` value.
+* `wrap_event` = 1 when the counter has wrapped from `PERIOD` to 0.
+* `overflow_underflow` = combines both events and marks **the beginning of a new period**.
 
 ---
 
-### 3. Memorarea starii anterioare a counter-ului
-
+### 3. Storing Previous Counter State
 ```verilog
 reg [15:0] last_count_val;
 reg last_overflow_underflow;
 ```
 
-* Se pastreaza valoarea counter-ului si starea overflow-ului de la pasul anterior pentru a detecta **momentul exact cand incepe o noua perioada**.
+* The counter value and overflow state from the previous step are preserved to detect **the exact moment when a new period begins**.
 
 ---
 
-### 4. Retinerea configurarilor active la inceputul perioadei
-
+### 4. Retaining Active Configurations at Period Start
 ```verilog
 reg[15:0] active_period;
 reg[15:0] active_compare1;
@@ -53,9 +45,8 @@ reg active_align_left_right;
 reg active_aligned_mode;
 ```
 
-* Aceste registre stocheaza configuratia curenta care se va utiliza **pana la urmatorul overflow**.
-* Actualizarea se face doar **la frontul pozitiv al overflow/underflow**:
-
+* These registers store the current configuration that will be used **until the next overflow**.
+* Update occurs only **on the rising edge of overflow/underflow**:
 ```verilog
 if (overflow_underflow && !last_overflow_underflow) begin
     active_period <= period;
@@ -68,23 +59,21 @@ end
 
 ---
 
-### 5. Generarea semnalului PWM
+### 5. PWM Signal Generation
 
-#### 5.1. PWM dezactivat
-
+#### 5.1. PWM Disabled
 ```verilog
 if (!pwm_en)
     pwm_out <= pwm_out;
 ```
 
-* Daca `pwm_en` = 0, semnalul PWM ramane in starea curenta.
+* If `pwm_en` = 0, the PWM signal remains in its current state.
 
 ---
 
-#### 5.2. Mod aliniat (`aligned_mode == 0`)
+#### 5.2. Aligned Mode (`aligned_mode == 0`)
 
 * **Left-aligned (`align_left_right == 0`)**
-
 ```verilog
 if (overflow_underflow && !last_overflow_underflow)
     pwm_out <= 1'b1;
@@ -92,12 +81,10 @@ else if (count_val == active_compare1)
     pwm_out <= 1'b0;
 ```
 
-* La inceputul perioadei &rarr; `pwm_out` = 1
-
-* Cand counter-ul ajunge la `COMPARE1` &rarr; `pwm_out` = 0
+* At the beginning of the period &rarr; `pwm_out` = 1
+* When the counter reaches `COMPARE1` &rarr; `pwm_out` = 0
 
 * **Right-aligned (`align_left_right == 1`)**
-
 ```verilog
 if (overflow_underflow && !last_overflow_underflow)
     pwm_out <= 1'b0;
@@ -105,13 +92,12 @@ else if (count_val == active_compare1)
     pwm_out <= 1'b1;
 ```
 
-* La inceputul perioadei &rarr; `pwm_out` = 0
-* La `COMPARE1` &rarr; `pwm_out` = 1
+* At the beginning of the period &rarr; `pwm_out` = 0
+* At `COMPARE1` &rarr; `pwm_out` = 1
 
 ---
 
-#### 5.3. Mod nealiniat (`aligned_mode == 1`)
-
+#### 5.3. Unaligned Mode (`aligned_mode == 1`)
 ```verilog
 if (overflow_underflow && !last_overflow_underflow)
     pwm_out <= 1'b0;
@@ -121,24 +107,21 @@ else if (count_val == active_compare2)
     pwm_out <= 1'b0;
 ```
 
-* La inceputul perioadei → `pwm_out` = 0
-
-* La `COMPARE1` → `pwm_out` = 1
-
-* La `COMPARE2` → `pwm_out` = 0
+* At the beginning of the period → `pwm_out` = 0
+* At `COMPARE1` &rarr; `pwm_out` = 1
+* At `COMPARE2` &rarr; `pwm_out` = 0
 
 ---
 
-### 6. Reset si sincronizare
+### 6. Reset and Synchronization
 
-* La reset asincron (`rst_n == 0`) &rarr; toate registrele si semnalul PWM sunt initializate la 0.
-* Toate operatiile se realizeaza pe frontul pozitiv al ceasului `clk`.
+* At asynchronous reset (`rst_n == 0`) &rarr; all registers and the PWM signal are initialized to 0.
+* All operations occur on the rising edge of the `clk` clock.
 
 ---
 
-### 7. Rezumat
+### 7. Summary
 
-* Codul sincronizeaza configurarile PWM la **inceputul perioadei**.
-* Suporta **left/right aligned** si **aligned/unaligned mode**.
-* Gestionarea PWM se face pe baza valorilor `COMPARE1` si `COMPARE2` si a starii counter-ului.
-
+* The code synchronizes PWM configurations at **the beginning of the period**.
+* Supports **left/right aligned** and **aligned/unaligned mode**.
+* PWM management is based on `COMPARE1` and `COMPARE2` values and counter state.
